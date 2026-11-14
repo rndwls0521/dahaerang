@@ -249,7 +249,7 @@ function renderOnboarding() {
     <p>다해랑 함께한 날들을 기록하고<br>앞으로 할 것들을 하나씩 모아봐요 💕</p>
     ${isStandalone() ? '' : `<div class="card" style="font-size:13px;line-height:1.6;color:var(--text-2);margin:-10px 0 16px;text-align:left">📱 <b style="font-weight:normal;color:var(--accent-ink)">홈 화면에 추가한 앱 아이콘으로 열어서</b> 시작해주세요.<br>아이폰은 Safari와 홈 화면 앱의 저장 공간이 따로라서, 여기서 입력한 내용은 앱에서 안 보여요.</div>`}
     <form class="card" data-form="onboard">
-      <div class="field"><label>내 이름</label><input class="input" name="me" placeholder="예) 나" required maxlength="12"></div>
+      <div class="field"><label>남자친구 이름</label><input class="input" name="me" placeholder="이름" required maxlength="12"></div>
       <div class="field"><label>여자친구 이름</label><input class="input" name="her" value="다해" required maxlength="12"></div>
       <div class="field"><label>우리가 사귄 날 💘</label><input class="input" type="date" name="start" required max="${todayKey()}"></div>
       <button class="btn block" type="submit">${heartFill(18)} 시작하기</button>
@@ -295,7 +295,7 @@ function viewHome() {
   </header>
 
   <section class="card hero" data-act="hearts">
-    <div class="couple">${avatar(p.me)}<div class="beat">${heartFill(30)}</div>${avatar(p.her)}</div>
+    <div class="couple"><button class="av-btn" data-act="edit-profile" data-who="me" aria-label="프로필 사진 바꾸기">${avatar(p.me)}<span class="cam">${icon('camera', 12)}</span></button><div class="beat">${heartFill(30)}</div><button class="av-btn" data-act="edit-profile" data-who="her" aria-label="프로필 사진 바꾸기">${avatar(p.her)}<span class="cam">${icon('camera', 12)}</span></button></div>
     <div class="names">${esc(p.me.name)}<span>♥</span>${esc(p.her.name)}</div>
     <div class="dcount"><small>우리 함께한 지</small><b>${n > 0 ? n.toLocaleString() : 'D' + (n - 1)}</b><em>${n > 0 ? '일째' : ''}</em></div>
     <div class="since">${fmtDot(p.startDate)} 부터 함께 💕</div>
@@ -656,7 +656,7 @@ function viewSettings() {
   const p = S.profile;
   const person = (key, who, label) => `
     <div class="profile-row">
-      <label class="avatar sm">${who.photoId ? photoImg(who.photoId) : esc(who.emoji || '🙂')}<span class="cam">${icon('camera', 12)}</span><input type="file" accept="image/*" hidden data-change="avatar" data-who="${key}"></label>
+      <button type="button" class="avatar sm" data-act="edit-profile" data-who="${key}" aria-label="프로필 사진 바꾸기">${who.photoId ? photoImg(who.photoId) : esc(who.emoji || '🙂')}<span class="cam">${icon('camera', 12)}</span></button>
       <div class="fields">
         <input value="${esc(who.name)}" placeholder="${label} 이름" maxlength="12" data-change="name" data-who="${key}">
         <button type="button" class="bday-link" data-act="go" data-to="birthdays">🎂 ${esc(bdayText(who))}</button>
@@ -666,8 +666,9 @@ function viewSettings() {
   return `
   <header class="topbar"><button class="icon-btn" data-act="back" aria-label="뒤로">${icon('left')}</button><h1 style="font-size:20px">설정</h1><span style="width:42px"></span></header>
 
-  <div class="set-title">우리 둘 (사진 · 이름 · 생일)</div>
-  <div class="set-group">${person('me', p.me, '나')}${person('her', p.her, '여자친구')}</div>
+  <div class="set-title">우리 둘 (사진을 누르면 바꿀 수 있어요)</div>
+  <div class="set-group">${person('me', p.me, '남자친구')}${person('her', p.her, '여자친구')}</div>
+  <div class="set-group"><button class="set-row" data-act="share-app"><div class="l">💌 ${esc(p.her.name)}에게 앱 보내기</div><div class="r">${icon('right', 16)}</div></button></div>
 
   <div class="set-group"><button class="set-row" data-act="go" data-to="birthdays"><div class="l">🎂 생일 관리 (양력·음력)</div><div class="r">${icon('right', 16)}</div></button></div>
 
@@ -823,7 +824,7 @@ function burst(x, y) {
 }
 
 /* ═════════════ 폼: 추억 ═════════════ */
-function memoryForm(existing, prefill = {}) {
+function memoryForm(existing, prefill = {}, initialFiles = []) {
   const m = existing ? { ...existing } : { type: 'date', date: todayKey(), title: '', place: '', mood: '', note: '', photoIds: [], ...prefill };
   const photos = (m.photoIds || []).map((id) => ({ id, existing: true }));
   const removed = [];
@@ -858,7 +859,7 @@ function memoryForm(existing, prefill = {}) {
     const drawGrid = () => {
       grid.innerHTML = photos.map((p, i) => `<div class="ph">${p.existing ? photoImg(p.id) : `<img src="${p.url}">`}<button type="button" class="x" data-rm="${i}">${icon('close', 12)}</button>${i === 0 ? '<span class="cover-tag">대표</span>' : ''}</div>`).join('') +
         Array.from({ length: pending }, () => '<div class="ph loading"></div>').join('') +
-        (photos.length + pending < MAX_PHOTOS ? `<button type="button" class="add" data-addph>${icon('camera', 22)}<span>${photos.length + pending}/${MAX_PHOTOS}</span></button>` : '');
+        (photos.length + pending < MAX_PHOTOS ? `<button type="button" class="add" data-cam>${icon('camera', 22)}<span>촬영</span></button><button type="button" class="add" data-addph>${icon('album', 22)}<span>앨범 ${photos.length + pending}/${MAX_PHOTOS}</span></button>` : '');
       hydratePhotos(grid);
       submitBtn.disabled = pending > 0;
       submitBtn.textContent = pending > 0 ? `사진 정리 중… (${pending})` : submitLabel;
@@ -877,6 +878,7 @@ function memoryForm(existing, prefill = {}) {
         $$('.mood-select button', s.body).forEach((b) => b.classList.toggle('on', b.dataset.mood === mood));
         haptic();
       } else if (t.hasAttribute('data-addph')) fileIn.click();
+      else if (t.hasAttribute('data-cam')) openCamera(addFiles);
       else if (t.dataset.rm != null) {
         const [p] = photos.splice(Number(t.dataset.rm), 1);
         if (p.existing) removed.push(p.id); else URL.revokeObjectURL(p.url);
@@ -890,9 +892,10 @@ function memoryForm(existing, prefill = {}) {
         }
       }
     });
-    fileIn.addEventListener('change', () => {
-      const files = [...fileIn.files].slice(0, MAX_PHOTOS - photos.length - pending);
-      fileIn.value = '';
+    fileIn.addEventListener('change', () => { const fl = [...fileIn.files]; fileIn.value = ''; addFiles(fl); });
+    if (initialFiles.length) addFiles(initialFiles);
+    function addFiles(list) {
+      const files = list.slice(0, MAX_PHOTOS - photos.length - pending);
       if (!files.length) return;
       pending += files.length;
       drawGrid();
@@ -904,7 +907,7 @@ function memoryForm(existing, prefill = {}) {
           drawGrid();
         }
       });
-    });
+    }
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       await processing;
@@ -1042,15 +1045,91 @@ function annivForm(existing) {
 }
 
 /* ═════════════ + 버튼 ═════════════ */
+/* ═════════════ 프로필 사진 ═════════════ */
+const AVATAR_EMOJIS = ['🐻', '🐰', '🐶', '🐱', '🦊', '🐼', '🐨', '🐯', '🐥', '🐹', '🦄', '🐧'];
+async function setAvatar(key, file) {
+  const who = S.profile[key];
+  const img = await loadImg(file);
+  const s = Math.min(img.naturalWidth, img.naturalHeight);
+  const c = document.createElement('canvas'); c.width = c.height = 400;
+  c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 400, 400);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.88));
+  const rec = { id: uid(), blob, thumb: blob, createdAt: Date.now() };
+  await db.put('photos', rec);
+  if (who.photoId) await deletePhoto(who.photoId);
+  who.photoId = rec.id;
+  await saveProfile();
+}
+function profileSheet(key) {
+  const who = S.profile[key];
+  const html = () => `
+    <div class="profile-edit">
+      <div class="avatar lg">${who.photoId ? photoImg(who.photoId) : esc(who.emoji || '🙂')}</div>
+      <div class="pe-name">${esc(who.name)}</div>
+    </div>
+    <div class="action-list">
+      <label class="action-item"><div class="em">📷</div><div><b>사진 찍기</b><small>카메라로 바로 찍어서 등록</small></div><input type="file" accept="image/*" capture="user" hidden data-pick></label>
+      <label class="action-item"><div class="em">🖼️</div><div><b>앨범에서 고르기</b><small>갤러리 사진으로 등록</small></div><input type="file" accept="image/*" hidden data-pick></label>
+    </div>
+    <div class="field" style="margin-top:18px"><label>이모지로 할래요</label><div class="mood-select">${AVATAR_EMOJIS.map((e) => `<button type="button" data-emo="${e}" class="${!who.photoId && who.emoji === e ? 'on' : ''}">${e}</button>`).join('')}</div></div>`;
+  openSheet('프로필 사진', html(), (s) => {
+    const redraw = () => { s.body.innerHTML = html(); hydratePhotos(s.body); };
+    s.body.addEventListener('change', async (e) => {
+      const inp = e.target.closest('[data-pick]'); if (!inp) return;
+      const file = inp.files[0]; inp.value = '';
+      if (!file) return;
+      try { await setAvatar(key, file); redraw(); rerender(); toast('프로필 사진을 바꿨어요 📸'); }
+      catch { toast('사진을 불러오지 못했어요 🥲'); }
+    });
+    s.body.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-emo]'); if (!b) return;
+      who.emoji = b.dataset.emo;
+      if (who.photoId) { await deletePhoto(who.photoId); who.photoId = ''; }
+      await saveProfile(); redraw(); rerender(); haptic();
+    });
+  });
+}
+
+/* ═════════════ 카메라 ═════════════ */
+// 폰의 기본 카메라 앱을 엽니다. 권한 요청은 폰(OS)이 처리하고, 처음 한 번만 안내를 보여줘요.
+function openCamera(onFiles) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+  inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.addEventListener('change', () => { const files = [...inp.files]; inp.remove(); if (files.length) onFiles(files); });
+  const go = () => inp.click();
+  if (localStorage.getItem('camGuided')) return go();
+  // 처음 한 번: 권한 안내 (버튼 클릭에서 바로 카메라를 열어야 폰이 막지 않아요)
+  const w = document.createElement('div');
+  w.className = 'dialog-wrap';
+  w.innerHTML = `<div class="sheet-dim"></div><div class="dialog"><div class="em">📷</div><h4>카메라를 열게요</h4><p>처음이면 <b>카메라 접근 허용</b>을 묻는 창이 떠요.<br>꼭 <b>허용</b>을 눌러주세요!<br><small style="color:var(--muted)">실수로 거부했다면 폰 설정 → (Safari 또는 Chrome) → 카메라에서 다시 허용할 수 있어요.</small></p><div class="btns"><button class="btn light" data-r="0">취소</button><button class="btn" data-r="1">카메라 열기</button></div></div>`;
+  document.body.appendChild(w);
+  w.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-r]');
+    if (!b && !e.target.classList.contains('sheet-dim')) return;
+    w.remove();
+    if (b?.dataset.r === '1') { try { localStorage.setItem('camGuided', '1'); } catch {} go(); }
+    else inp.remove();
+  });
+}
+
 function plusSheet() {
   openSheet('무엇을 남길까요?', `
   <div class="action-list">
+    <button class="action-item" data-a="camera"><div class="em">📷</div><div><b>지금 찍어서 기록하기</b><small>카메라로 찍고 바로 추억에 등록</small></div></button>
     <button class="action-item" data-a="memory"><div class="em">📸</div><div><b>추억 기록하기</b><small>오늘 혹은 지난 데이트·여행</small></div></button>
     <button class="action-item" data-a="plan"><div class="em">📅</div><div><b>데이트 일정 잡기</b><small>날짜를 정해서 캘린더에 쏙</small></div></button>
     <button class="action-item" data-a="wish"><div class="em">✍️</div><div><b>하고 싶은 것 적기</b><small>사소한 것도, 버킷리스트도</small></div></button>
   </div>`, (s) => {
     s.body.addEventListener('click', async (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+      if (a === 'camera') {
+        // 카메라는 탭한 순간에 열어야 해서 시트를 닫기 전에 실행
+        openCamera((files) => memoryForm(null, { date: todayKey() }, files));
+        s.close();
+        return;
+      }
       await s.close();
       if (a === 'memory') memoryForm(null, { date: calSelPast() });
       if (a === 'plan') wishForm(null, { targetDate: calSelFuture(), category: 'date' });
@@ -1163,6 +1242,13 @@ const actions = {
   'edit-anniv': (el) => annivForm((S.profile.custom || []).find((c) => c.id === el.dataset.id)),
   export: () => exportData(),
   'edit-bday': (el) => bdayForm(el.dataset.who),
+  'edit-profile': (el) => profileSheet(el.dataset.who),
+  'share-app': async () => {
+    const url = 'https://rndwls0521.github.io/dahaerang/';
+    const text = `💕 우리 커플앱 [다해랑] 설치해줘!\n아이폰: Safari로 열고 공유 버튼 → '홈 화면에 추가'\n안드로이드: Chrome으로 열고 메뉴 → '앱 설치'`;
+    if (navigator.share) { try { await navigator.share({ title: '다해랑', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('링크를 복사했어요! 카톡에 붙여넣기 💌'); } catch { toast(url); }
+  },
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -1201,22 +1287,7 @@ document.addEventListener('change', async (e) => {
   if (k === 'name') { who.name = el.value.trim() || who.name; await saveProfile(); }
   else if (k === 'birthday') { who.birthday = el.value; await saveProfile(); toast('생일을 저장했어요 🎈'); }
   else if (k === 'start') { if (el.value) { S.profile.startDate = el.value; await saveProfile(); toast('사귄 날을 바꿨어요 💘'); } }
-  else if (k === 'avatar') {
-    const file = el.files[0]; if (!file) return;
-    try {
-      const img = await loadImg(file);
-      const s = Math.min(img.naturalWidth, img.naturalHeight);
-      const c = document.createElement('canvas'); c.width = c.height = 360;
-      c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 360, 360);
-      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.88));
-      const rec = { id: uid(), blob, thumb: blob, createdAt: Date.now() };
-      await db.put('photos', rec);
-      if (who.photoId) await deletePhoto(who.photoId);
-      who.photoId = rec.id;
-      await saveProfile();
-      rerender();
-    } catch { toast('사진을 불러오지 못했어요 🥲'); }
-  } else if (k === 'import') { const f = el.files[0]; el.value = ''; if (f) await importData(f); }
+  else if (k === 'import') { const f = el.files[0]; el.value = ''; if (f) await importData(f); }
 });
 window.addEventListener('hashchange', () => render());
 
