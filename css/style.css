@@ -325,7 +325,8 @@ h1, h2, h3, h4 { margin: 0; font-weight: normal; }
 .photo-grid .ph .x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0,0,0,.5); color: #fff; display: grid; place-items: center; }
 .photo-grid .ph .cover-tag { position: absolute; left: 4px; bottom: 4px; font-size: 10px; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 999px; }
 .photo-grid .add { aspect-ratio: 1; border-radius: 14px; border: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); display: grid; place-items: center; align-content: center; gap: 2px; font-size: 11px; }
-.photo-grid .add.busy { opacity: .5; pointer-events: none; }
+.photo-grid .ph.loading { background: linear-gradient(100deg, var(--accent-soft) 30%, #fff 50%, var(--accent-soft) 70%); background-size: 300% 100%; animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .sheet-foot { display: flex; gap: 10px; margin-top: 8px; }
 .sheet-foot .btn { flex: 1; }
 .sheet-foot .btn.danger { flex: none; width: 52px; padding: 0; height: 52px; }

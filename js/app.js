@@ -54,6 +54,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const haptic = (ms = 10) => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
 const live = (store) => S[store].filter((x) => !x.deleted);
+const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
 /* ═════════════ 저장소 (나중에 동기화 계층으로 교체될 부분) ═════════════ */
 async function saveRec(store, rec) {
@@ -164,7 +165,7 @@ const memDates = (m) => {
   return out;
 };
 const sortedMemories = () => live('memories').sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
-const tripLen = (m) => { const n = diffDays(parseKey(m.date), parseKey(m.endDate)); return n > 0 ? `${n}박 ${n + 1}일` : ''; };
+const tripLen = (m) => { if (!m.endDate) return ''; const n = diffDays(parseKey(m.date), parseKey(m.endDate)); return n > 0 ? `${n}박 ${n + 1}일` : ''; };
 
 /* ═════════════ 라우터 ═════════════ */
 const view = () => $('#view');
@@ -208,6 +209,7 @@ function renderOnboarding() {
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>다해랑</h1>
     <p>다해랑 함께한 날들을 기록하고<br>앞으로 할 것들을 하나씩 모아봐요 💕</p>
+    ${isStandalone() ? '' : `<div class="card" style="font-size:13px;line-height:1.6;color:var(--text-2);margin:-10px 0 16px;text-align:left">📱 <b style="font-weight:normal;color:var(--accent-ink)">홈 화면에 추가한 앱 아이콘으로 열어서</b> 시작해주세요.<br>아이폰은 Safari와 홈 화면 앱의 저장 공간이 따로라서, 여기서 입력한 내용은 앱에서 안 보여요.</div>`}
     <form class="card" data-form="onboard">
       <div class="field"><label>내 이름</label><input class="input" name="me" placeholder="예) 나" required maxlength="12"></div>
       <div class="field"><label>여자친구 이름</label><input class="input" name="her" value="다해" required maxlength="12"></div>
@@ -539,7 +541,7 @@ function viewSettings() {
 
   <div class="set-title">데이터 (지금은 이 폰에만 저장돼요)</div>
   <div class="set-group">
-    <button class="set-row" data-act="export"><div class="l">${icon('download', 18)} 백업 파일 만들기</div><div class="r">${icon('right', 16)}</div></button>
+    <button class="set-row" data-act="export"><div class="l">${icon('download', 18)} 백업 파일 만들기</div><div class="r">${p.lastBackup ? `마지막 ${fmtDot(p.lastBackup).slice(2)}` : '아직 안 했어요'} ${icon('right', 16)}</div></button>
     <label class="set-row" style="cursor:pointer"><div class="l">${icon('upload', 18)} 백업 불러오기</div><div class="r">${icon('right', 16)}</div><input type="file" accept="application/json,.json" hidden data-change="import"></label>
     <div class="set-row"><div class="l">💾 사용 중인 공간</div><div class="r" id="storage-usage">계산 중…</div></div>
   </div>
@@ -603,13 +605,15 @@ function openSheet(title, html, onMount) {
     setTimeout(() => wrap.remove(), 220);
   };
   s.close = () => closeLayer(s);
-  $('.sheet-dim', wrap).addEventListener('click', () => s.close());
+  // 작성 중인 폼은 바깥을 눌러도 바로 닫히지 않게 (s.guard)
+  const tryClose = async () => { if (!s.guard || (await s.guard())) s.close(); };
+  $('.sheet-dim', wrap).addEventListener('click', tryClose);
   // 손잡이 드래그로 닫기
   const sheet = $('.sheet', wrap);
   let startY = null;
   sheet.addEventListener('touchstart', (e) => { if (sheet.scrollTop <= 0 && e.target.closest('.sheet-handle, .sheet-title')) startY = e.touches[0].clientY; }, { passive: true });
   sheet.addEventListener('touchmove', (e) => { if (startY == null) return; const dy = Math.max(0, e.touches[0].clientY - startY); sheet.style.transform = `translateY(${dy}px)`; }, { passive: true });
-  sheet.addEventListener('touchend', (e) => { if (startY == null) return; const dy = e.changedTouches[0].clientY - startY; startY = null; sheet.style.transform = ''; if (dy > 90) s.close(); });
+  sheet.addEventListener('touchend', (e) => { if (startY == null) return; const dy = e.changedTouches[0].clientY - startY; startY = null; sheet.style.transform = ''; if (dy > 90) tryClose(); });
   sheets.push(s);
   history.pushState({ sheet: true }, '');
   hydratePhotos(wrap);
@@ -700,10 +704,17 @@ function memoryForm(existing, prefill = {}) {
     const f = $('form', s.body);
     let type = m.type || 'date', mood = m.mood || '';
     const grid = $('#pgrid', s.body), fileIn = $('#pfile', s.body);
+    const submitBtn = $('[type=submit]', f), submitLabel = submitBtn.textContent;
+    let pending = 0, processing = Promise.resolve(), dirty = false;
+    f.addEventListener('input', () => (dirty = true));
+    s.guard = () => (!dirty && !pending && !photos.some((p) => !p.existing)) || confirmDialog({ emoji: '✍️', title: '작성 중인 내용이 있어요', text: '닫으면 지금까지 쓴 내용이 사라져요.', ok: '닫기', cancel: '계속 쓰기' });
     const drawGrid = () => {
       grid.innerHTML = photos.map((p, i) => `<div class="ph">${p.existing ? photoImg(p.id) : `<img src="${p.url}">`}<button type="button" class="x" data-rm="${i}">${icon('close', 12)}</button>${i === 0 ? '<span class="cover-tag">대표</span>' : ''}</div>`).join('') +
-        (photos.length < MAX_PHOTOS ? `<button type="button" class="add" data-addph>${icon('camera', 22)}<span>${photos.length}/${MAX_PHOTOS}</span></button>` : '');
+        Array.from({ length: pending }, () => '<div class="ph loading"></div>').join('') +
+        (photos.length + pending < MAX_PHOTOS ? `<button type="button" class="add" data-addph>${icon('camera', 22)}<span>${photos.length + pending}/${MAX_PHOTOS}</span></button>` : '');
       hydratePhotos(grid);
+      submitBtn.disabled = pending > 0;
+      submitBtn.textContent = pending > 0 ? `사진 정리 중… (${pending})` : submitLabel;
     };
     drawGrid();
     s.body.addEventListener('click', async (e) => {
@@ -728,23 +739,28 @@ function memoryForm(existing, prefill = {}) {
           await removeRec('memories', existing);
           await s.close();
           toast('추억을 삭제했어요');
-          go('memories');
+          location.replace('#/memories');
         }
       }
     });
-    fileIn.addEventListener('change', async () => {
-      const files = [...fileIn.files].slice(0, MAX_PHOTOS - photos.length);
+    fileIn.addEventListener('change', () => {
+      const files = [...fileIn.files].slice(0, MAX_PHOTOS - photos.length - pending);
       fileIn.value = '';
       if (!files.length) return;
-      const addBtn = $('[data-addph]', grid); addBtn?.classList.add('busy');
-      for (const file of files) {
-        try { const rec = await processPhoto(file); photos.push({ id: rec.id, rec, url: URL.createObjectURL(rec.thumb) }); }
-        catch { toast('사진을 불러오지 못했어요 🥲'); }
-      }
+      pending += files.length;
       drawGrid();
+      processing = processing.then(async () => {
+        for (const file of files) {
+          try { const rec = await processPhoto(file); photos.push({ id: rec.id, rec, url: URL.createObjectURL(rec.thumb) }); }
+          catch { toast('사진 한 장을 불러오지 못했어요 🥲'); }
+          pending--;
+          drawGrid();
+        }
+      });
     });
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
+      await processing;
       const fd = new FormData(f);
       const btn = $('[type=submit]', f); btn.disabled = true; btn.textContent = '저장 중…';
       try {
@@ -924,12 +940,14 @@ async function exportData() {
   for (const p of photos) out.photos.push({ id: p.id, createdAt: p.createdAt, blob: await blobToDataURL(p.blob), thumb: p.thumb ? await blobToDataURL(p.thumb) : null });
   const name = `다해랑-백업-${todayKey()}.json`;
   const file = new File([JSON.stringify(out)], name, { type: 'application/json' });
+  const markDone = async () => { S.profile.lastBackup = todayKey(); await db.put('meta', S.profile); if (parseRoute().name === 'settings') rerender(); };
   if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: '다해랑 백업' }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ files: [file], title: '다해랑 백업' }); await markDone(); toast('백업 완료! 💾'); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(file); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  await markDone();
   toast('백업 파일을 저장했어요 💾');
 }
 async function importData(file) {
@@ -983,7 +1001,7 @@ const actions = {
   'edit-memory': (el) => { const m = S.memories.find((x) => x.id === el.dataset.id); if (m) memoryForm(m); },
   'del-memory': async (el) => {
     const m = S.memories.find((x) => x.id === el.dataset.id);
-    if (m && (await confirmDialog({ title: '이 추억을 지울까요?', text: '사진도 함께 삭제되고 되돌릴 수 없어요.', ok: '삭제', danger: true }))) { await removeRec('memories', m); toast('추억을 삭제했어요'); go('memories'); }
+    if (m && (await confirmDialog({ title: '이 추억을 지울까요?', text: '사진도 함께 삭제되고 되돌릴 수 없어요.', ok: '삭제', danger: true }))) { await removeRec('memories', m); toast('추억을 삭제했어요'); location.replace('#/memories'); }
   },
   viewer: (el) => openViewer(el.dataset.id, Number(el.dataset.i)),
   'mem-view': () => { S.memView = S.memView === 'album' ? 'timeline' : 'album'; rerender(); },
@@ -1063,8 +1081,15 @@ async function init() {
   applyTheme();
   render();
   try { navigator.storage?.persist?.(); } catch {}
-  // 날짜가 바뀌면 D-day 갱신
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !sheets.length) rerender(); });
+  // 날짜가 바뀌었을 때만 D-day 갱신 (입력 중인 내용이 날아가지 않게)
+  let day = todayKey();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || sheets.length || day === todayKey()) return;
+    day = todayKey();
+    rerender();
+  });
+  // iOS에서 :active 눌림 효과가 보이도록
+  document.addEventListener('touchstart', () => {}, { passive: true });
 }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
