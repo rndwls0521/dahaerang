@@ -124,6 +124,45 @@ function hydratePhotos(root = document) {
 }
 const photoImg = (id, full = false, alt = '') => `<img data-photo="${esc(id)}" data-full="${full ? 1 : 0}" alt="${esc(alt)}" loading="lazy">`;
 
+/* ═════════════ 생일 (양력/음력) ═════════════ */
+// 음력은 브라우저 내장 중국력(Intl)으로 변환합니다. 한국 음력과 드물게 하루 차이가 날 수 있어요.
+const lunarFmt = (() => {
+  try {
+    const f = new Intl.DateTimeFormat('en-u-ca-chinese', { year: 'numeric', month: 'numeric', day: 'numeric' });
+    return f.resolvedOptions().calendar === 'chinese' ? f : null;
+  } catch { return null; }
+})();
+const lunarCache = new Map();
+function lunarToSolar(ly, lm, ld) {
+  if (!lunarFmt) return null;
+  if (!lunarCache.has(ly)) {
+    const map = {};
+    for (let d = new Date(ly, 0, 15), end = new Date(ly + 1, 2, 1); d < end; d = addDays(d, 1)) {
+      const p = Object.fromEntries(lunarFmt.formatToParts(d).map((x) => [x.type, x.value]));
+      if (Number(p.relatedYear || p.year) === ly && /^\d+$/.test(p.month)) map[`${Number(p.month)}-${Number(p.day)}`] = toKey(d);
+    }
+    lunarCache.set(ly, map);
+  }
+  const m = lunarCache.get(ly);
+  return m[`${lm}-${ld}`] || m[`${lm}-${ld - 1}`] || null; // 30일이 없는 해는 29일로
+}
+function birthdayIn(who, y) {
+  if (!who.birthday) return null;
+  const b = parseKey(who.birthday);
+  if (who.lunar) return lunarToSolar(y, b.getMonth() + 1, b.getDate());
+  return toKey(new Date(y, b.getMonth(), b.getDate()));
+}
+function nextBirthday(who) {
+  if (!who.birthday) return null;
+  const t = todayKey(), y = new Date().getFullYear();
+  for (const yy of [y - 1, y, y + 1]) {
+    const k = birthdayIn(who, yy);
+    if (k && k >= t) return { date: k, nth: yy - parseKey(who.birthday).getFullYear() };
+  }
+  return null;
+}
+const bdayText = (who) => { if (!who.birthday) return '생일을 알려주세요'; const b = parseKey(who.birthday); return `${who.lunar ? '음력' : '양력'} ${b.getFullYear()}.${pad(b.getMonth() + 1)}.${pad(b.getDate())}`; };
+
 /* ═════════════ 기념일 계산 ═════════════ */
 function anniversaries() {
   const p = S.profile, out = [];
@@ -140,8 +179,7 @@ function anniversaries() {
   const years = []; for (let y = Math.min(s.getFullYear(), now) - 1; y <= now + 3; y++) years.push(y);
   for (const who of [p.me, p.her]) {
     if (!who.birthday) continue;
-    const b = parseKey(who.birthday);
-    for (const y of years) out.push({ title: `${who.name || '?'} 생일`, date: toKey(new Date(y, b.getMonth(), b.getDate())), emoji: '🎈', kind: 'birthday' });
+    for (const y of years) { const k = birthdayIn(who, y); if (k) out.push({ title: `${who.name || '?'} 생일`, date: k, emoji: '🎂', kind: 'birthday' }); }
   }
   for (const c of p.custom || []) {
     if (c.repeat) {
@@ -175,7 +213,7 @@ let lastRoute = '';
 function render(keepScroll = false) {
   if (!S.profile.startDate) return renderOnboarding();
   const { name, param } = parseRoute();
-  const fn = { home: viewHome, calendar: viewCalendar, wish: viewWish, memories: viewMemories, memory: viewMemoryDetail, settings: viewSettings }[name] || viewHome;
+  const fn = { home: viewHome, calendar: viewCalendar, wish: viewWish, memories: viewMemories, memory: viewMemoryDetail, settings: viewSettings, birthdays: viewBirthdays }[name] || viewHome;
   const v = view();
   const y = window.scrollY;
   const routeKey = name + '/' + (param || '');
@@ -243,6 +281,13 @@ function viewHome() {
   if (!feat) { const withPh = mems.filter((m) => m.photoIds?.length); const pool = withPh.length ? withPh : mems; feat = pool[(new Date().getDate()) % (pool.length || 1)]; featLabel = '우리의 추억 한 조각 📸'; }
 
   const R = 24, C = 2 * Math.PI * R;
+  // 홈 위시 미리보기: 날짜 정해진 것 먼저, 나머지는 위시 화면과 같은 순서
+  const todoSorted = todo.slice().sort((a, b) => (a.targetDate || '9999').localeCompare(b.targetDate || '9999') || b.createdAt - a.createdAt);
+  const preview = todoSorted.slice(0, 3);
+  const moreCount = todoSorted.length - preview.length;
+  // 생일 (가까운 순)
+  const bdays = [p.me, p.her].map((w) => ({ who: w, nb: nextBirthday(w) })).sort((a, b) => (a.nb?.date || '9999').localeCompare(b.nb?.date || '9999'));
+  const soon = bdays.find((b) => b.nb && diffDays(new Date(), parseKey(b.nb.date)) <= 14);
   return `
   <header class="topbar">
     <div class="brand">다해랑 ${heartFill(20)}</div>
@@ -277,6 +322,42 @@ function viewHome() {
     </button>`}
   </section>
 
+  ${soon ? `
+  <section class="section">
+    <button class="card bday-banner" data-act="go" data-to="birthdays">
+      <span class="cake">🎂</span>
+      <div class="info"><b>${esc(soon.who.name)} 생일${soon.nb.date === t ? '이에요! 축하해 🎉' : '이 다가와요'}</b><small>${fmtFull(soon.nb.date)} · ${soon.nb.nth}번째 생일</small></div>
+      <span class="dd">${dLabel(soon.nb.date)}</span>
+    </button>
+  </section>` : ''}
+
+  <section class="section">
+    <div class="sec-head"><h3>우리 위시 <small class="muted">${done}/${wishes.length}</small></h3><button class="link" data-act="go" data-to="wish">전체보기 ›</button></div>
+    <div class="card wish-mini">
+      ${preview.map((w) => `
+      <div class="wm-row">
+        <button class="check" data-act="toggle-wish" data-id="${w.id}" aria-label="완료">${icon('check', 14)}</button>
+        <button class="wm-title" data-act="edit-wish" data-id="${w.id}"><span>${catOf(w.category).emoji} ${esc(w.title)}</span>${w.targetDate ? `<span class="chip plan">${dLabel(w.targetDate)}</span>` : ''}</button>
+      </div>`).join('') || '<div class="wm-empty">같이 하고 싶은 걸 적어봐요 🌱</div>'}
+      ${moreCount > 0 ? `<button class="wm-more" data-act="go" data-to="wish">+ ${moreCount}개 더 보기</button>` : ''}
+      <form class="quick-add mini" data-form="quick-wish" data-cat="date">
+        <input name="title" placeholder="하고 싶은 거 바로 적기" maxlength="80" autocomplete="off" enterkeyhint="done">
+        <button type="submit" aria-label="위시 추가">${icon('plus', 18)}</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head"><h3>우리 생일</h3><button class="link" data-act="go" data-to="birthdays">관리 ›</button></div>
+    <div class="grid2">
+      ${[p.me, p.her].map((w) => { const nb = nextBirthday(w); return `
+      <button class="card bday-mini" data-act="go" data-to="birthdays">
+        ${avatar(w, 'xs')}
+        <div><b>${esc(w.name)}</b><small>${nb ? `${fmtDot(nb.date).slice(5)} · ${dLabel(nb.date)}` : '생일 등록하기'}</small></div>
+      </button>`; }).join('')}
+    </div>
+  </section>
+
   <section class="section grid2">
     <button class="card stat" data-act="go" data-to="wish">
       <div class="label">위시 달성률</div>
@@ -297,12 +378,7 @@ function viewHome() {
     <div class="q"><span>오늘은 이거 어때? 🤔</span><button class="icon-btn" style="width:34px;height:34px" data-act="shuffle" aria-label="다른 거">${icon('shuffle', 16)}</button></div>
     <div class="w">${catOf(sug.category).emoji} ${esc(sug.title)}</div>
     <div class="row"><button class="btn sm" data-act="toggle-wish" data-id="${sug.id}">${icon('check', 16)} 했어요!</button><button class="btn sm ghost" data-act="plan-wish" data-id="${sug.id}">📅 날짜 정하기</button></div>
-  </section>` : `
-  <section class="section card suggest">
-    <div class="q"><span>하고 싶은 거 있어? ✍️</span></div>
-    <div class="w">사소한 것도 좋아요.<br>생각날 때 바로 적어두기!</div>
-    <div class="row"><button class="btn sm" data-act="new-wish">${icon('plus', 16)} 위시 추가</button></div>
-  </section>`}
+  </section>` : ''}
 
   ${feat ? `
   <section class="section">
@@ -507,6 +583,75 @@ function viewMemoryDetail(id) {
 }
 
 /* ═════════════ 설정 ═════════════ */
+/* ═════════════ 생일 ═════════════ */
+function viewBirthdays() {
+  const p = S.profile;
+  const card = (key, who) => {
+    const nb = nextBirthday(who);
+    const days = nb ? diffDays(new Date(), parseKey(nb.date)) : null;
+    const pct = nb ? Math.max(4, Math.round((1 - days / 365) * 100)) : 0;
+    return `
+    <section class="card bday-card">
+      <div class="top">
+        ${avatar(who)}
+        <div class="who"><b>${esc(who.name)}</b><span class="chip ${who.birthday ? '' : 'gray'}">${esc(bdayText(who))}</span></div>
+        <button class="icon-btn" data-act="edit-bday" data-who="${key}" aria-label="생일 수정">${icon('edit', 18)}</button>
+      </div>
+      ${nb ? `
+      <div class="count"><small>${days === 0 ? '오늘이에요!' : '다음 생일까지'}</small><b>${days === 0 ? '🎉 HAPPY BIRTHDAY' : 'D-' + days}</b></div>
+      <div class="bar soft"><i style="width:${pct}%"></i></div>
+      <div class="meta"><span>${fmtFull(nb.date)}</span><span>${nb.nth}번째 생일</span></div>
+      ${(() => { const firstTogether = p.startDate && nb.date >= p.startDate; return firstTogether ? `<div class="meta"><span>우리가 함께하는 ${relDay(nb.date)}일째 날 💕</span></div>` : ''; })()}` : `
+      <button class="btn ghost block" style="margin-top:14px" data-act="edit-bday" data-who="${key}">🎂 생일 등록하기</button>`}
+    </section>`;
+  };
+  const list = [['me', p.me], ['her', p.her]].sort((a, b) => (nextBirthday(a[1])?.date || '9999').localeCompare(nextBirthday(b[1])?.date || '9999'));
+  return `
+  <header class="topbar"><button class="icon-btn" data-act="back" aria-label="뒤로">${icon('left')}</button><h1 style="font-size:20px">우리 생일 🎂</h1><span style="width:42px"></span></header>
+  ${list.map(([k, w]) => card(k, w)).join('')}
+  <p class="hint" style="text-align:center;margin-top:16px">생일 2주 전부터 홈 화면에 알려드려요.<br>음력 생일은 매년 양력 날짜로 자동 계산돼요.</p>`;
+}
+function bdayForm(key) {
+  const who = S.profile[key];
+  openSheet(`${esc(who.name)} 생일 🎂`, `
+  <form>
+    <div class="field"><div class="chips-select" data-group="cal">
+      <button type="button" data-v="solar" class="${who.lunar ? '' : 'on'}">☀️ 양력</button>
+      <button type="button" data-v="lunar" class="${who.lunar ? 'on' : ''}" ${lunarFmt ? '' : 'disabled'}>🌙 음력</button>
+    </div>${lunarFmt ? '' : '<p class="hint">이 기기에서는 음력 계산을 지원하지 않아요.</p>'}</div>
+    <div class="field"><label class="lbl">${who.lunar ? '음력 생년월일' : '생년월일'}</label><input class="input" type="date" name="birthday" value="${esc(who.birthday || '')}" max="${todayKey()}" required></div>
+    <p class="hint" data-preview></p>
+    <div class="sheet-foot">${who.birthday ? `<button type="button" class="btn danger" data-del aria-label="지우기">${icon('trash', 20)}</button>` : ''}<button class="btn block" type="submit">저장</button></div>
+  </form>`, (s) => {
+    let lunar = !!who.lunar;
+    const f = $('form', s.body), prev = $('[data-preview]', s.body);
+    const preview = () => {
+      const v = f.birthday.value;
+      if (!v) { prev.textContent = ''; return; }
+      const nb = nextBirthday({ birthday: v, lunar });
+      prev.textContent = nb ? `👉 다음 생일은 ${fmtFull(nb.date)} (${dLabel(nb.date)})` : '';
+    };
+    preview();
+    f.birthday.addEventListener('input', preview);
+    s.body.addEventListener('click', async (e) => {
+      const t = e.target.closest('button'); if (!t) return;
+      if (t.closest('[data-group=cal]')) {
+        lunar = t.dataset.v === 'lunar';
+        $$('[data-group=cal] button', s.body).forEach((b) => b.classList.toggle('on', b === t));
+        $('.lbl', s.body).textContent = lunar ? '음력 생년월일' : '생년월일';
+        preview();
+      } else if (t.hasAttribute('data-del')) {
+        who.birthday = ''; who.lunar = false; await saveProfile(); await s.close(); rerender();
+      }
+    });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      who.birthday = f.birthday.value; who.lunar = lunar;
+      await saveProfile(); await s.close(); toast('생일을 저장했어요 🎂'); rerender();
+    });
+  });
+}
+
 function viewSettings() {
   const p = S.profile;
   const person = (key, who, label) => `
@@ -514,7 +659,7 @@ function viewSettings() {
       <label class="avatar sm">${who.photoId ? photoImg(who.photoId) : esc(who.emoji || '🙂')}<span class="cam">${icon('camera', 12)}</span><input type="file" accept="image/*" hidden data-change="avatar" data-who="${key}"></label>
       <div class="fields">
         <input value="${esc(who.name)}" placeholder="${label} 이름" maxlength="12" data-change="name" data-who="${key}">
-        <input type="date" value="${esc(who.birthday || '')}" data-change="birthday" data-who="${key}" aria-label="${label} 생일">
+        <button type="button" class="bday-link" data-act="go" data-to="birthdays">🎂 ${esc(bdayText(who))}</button>
       </div>
     </div>`;
   const customs = (p.custom || []).slice().sort((a, b) => a.date.localeCompare(b.date));
@@ -523,6 +668,8 @@ function viewSettings() {
 
   <div class="set-title">우리 둘 (사진 · 이름 · 생일)</div>
   <div class="set-group">${person('me', p.me, '나')}${person('her', p.her, '여자친구')}</div>
+
+  <div class="set-group"><button class="set-row" data-act="go" data-to="birthdays"><div class="l">🎂 생일 관리 (양력·음력)</div><div class="r">${icon('right', 16)}</div></button></div>
 
   <div class="set-title">우리의 시작</div>
   <div class="set-group">
@@ -1015,6 +1162,7 @@ const actions = {
   theme: async (el) => { S.profile.theme = el.dataset.theme; await saveProfile(); applyTheme(); rerender(); },
   'edit-anniv': (el) => annivForm((S.profile.custom || []).find((c) => c.id === el.dataset.id)),
   export: () => exportData(),
+  'edit-bday': (el) => bdayForm(el.dataset.who),
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -1028,7 +1176,7 @@ document.addEventListener('submit', async (e) => {
     e.preventDefault();
     const title = f.elements.title.value.trim();
     if (!title) return wishForm(null);
-    await saveRec('wishes', { id: uid(), title, category: S.wishCat !== 'all' ? S.wishCat : 'small', done: false, targetDate: '', note: '' });
+    await saveRec('wishes', { id: uid(), title, category: f.dataset.cat || (S.wishCat !== 'all' ? S.wishCat : 'small'), done: false, targetDate: '', note: '' });
     S.wishTab = 'todo';
     haptic();
     toast('위시에 담았어요 ✍️');
@@ -1072,6 +1220,30 @@ document.addEventListener('change', async (e) => {
 });
 window.addEventListener('hashchange', () => render());
 
+/* ═════════════ 우편함 (PC에서 적은 위시를 폰으로 보내기) ═════════════ */
+// inbox.json에 있는 위시 중 이 폰에 아직 없는 id만 한 번 추가합니다.
+// 지운 위시는 기록(삭제 표시)이 남아 있어서 다시 생기지 않아요.
+async function checkInbox() {
+  if (location.protocol === 'file:' || !navigator.onLine) return;
+  try {
+    const res = await fetch('inbox.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    let added = 0;
+    for (const w of data.wishes || []) {
+      if (!w.id || !w.title || S.wishes.some((x) => x.id === w.id)) continue;
+      const rec = { done: false, targetDate: '', note: '', category: 'date', ...w, updatedAt: w.createdAt || Date.now() };
+      await db.put('wishes', rec);
+      S.wishes.push(rec);
+      added++;
+    }
+    if (added) {
+      toast(`💌 새 위시 ${added}개가 도착했어요!`);
+      if (!sheets.length && S.profile.startDate) rerender();
+    }
+  } catch {}
+}
+
 /* ═════════════ 시작 ═════════════ */
 async function init() {
   const [profile, memories, wishes] = await Promise.all([db.get('meta', 'profile'), db.all('memories'), db.all('wishes')]);
@@ -1081,6 +1253,7 @@ async function init() {
   applyTheme();
   render();
   try { navigator.storage?.persist?.(); } catch {}
+  checkInbox();
   // 날짜가 바뀌었을 때만 D-day 갱신 (입력 중인 내용이 날아가지 않게)
   let day = todayKey();
   document.addEventListener('visibilitychange', () => {

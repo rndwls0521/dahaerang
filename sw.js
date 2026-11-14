@@ -1,6 +1,6 @@
 // 오프라인에서도 앱이 열리도록 앱 파일을 캐시합니다.
 // 앱을 수정한 뒤 배포할 때는 VERSION 숫자를 올려주세요.
-const VERSION = 'dahaerang-v2';
+const VERSION = 'dahaerang-v3';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/style.css', './js/app.js', './js/db.js', './js/icons.js',

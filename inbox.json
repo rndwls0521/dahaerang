@@ -1,0 +1,166 @@
+{
+ "wishes": [
+  {
+   "id": "inbox-20261115-01",
+   "title": "어벤저스 둠스데이 아이맥스에서 보기",
+   "category": "date",
+   "createdAt": 1794600000000
+  },
+  {
+   "id": "inbox-20261115-02",
+   "title": "크리스마스 명동 신세계 가기",
+   "category": "date",
+   "createdAt": 1794699999000
+  },
+  {
+   "id": "inbox-20261115-03",
+   "title": "같이 쇼핑하기",
+   "category": "date",
+   "createdAt": 1794699998000
+  },
+  {
+   "id": "inbox-20261115-04",
+   "title": "한강에서 자전거랑 피크닉",
+   "category": "date",
+   "createdAt": 1794699997000
+  },
+  {
+   "id": "inbox-20261115-05",
+   "title": "경주월드 가기",
+   "category": "trip",
+   "createdAt": 1794699996000
+  },
+  {
+   "id": "inbox-20261115-06",
+   "title": "후지큐 하이랜드 가기",
+   "category": "trip",
+   "createdAt": 1794699995000
+  },
+  {
+   "id": "inbox-20261115-07",
+   "title": "번지점프 하기",
+   "category": "bucket",
+   "createdAt": 1794699994000
+  },
+  {
+   "id": "inbox-20261115-08",
+   "title": "만화카페 가기",
+   "category": "date",
+   "createdAt": 1794699993000
+  },
+  {
+   "id": "inbox-20261115-09",
+   "title": "네일 따라가기",
+   "category": "small",
+   "createdAt": 1794699992000
+  },
+  {
+   "id": "inbox-20261115-10",
+   "title": "다해랑 술 먹기",
+   "category": "small",
+   "createdAt": 1794699991000
+  },
+  {
+   "id": "inbox-20261115-11",
+   "title": "네컷사진 찍기",
+   "category": "small",
+   "createdAt": 1794699990000
+  },
+  {
+   "id": "inbox-20261115-12",
+   "title": "잇테잌투 게임 같이 하기",
+   "category": "small",
+   "createdAt": 1794699989000
+  },
+  {
+   "id": "inbox-20261115-13",
+   "title": "일산킨텍스 전시 보러가기",
+   "category": "date",
+   "createdAt": 1794699988000
+  },
+  {
+   "id": "inbox-20261115-14",
+   "title": "스타필드 가서 놀기",
+   "category": "date",
+   "createdAt": 1794699987000
+  },
+  {
+   "id": "inbox-20261115-15",
+   "title": "뮤지컬 보기",
+   "category": "date",
+   "createdAt": 1794699986000
+  },
+  {
+   "id": "inbox-20261115-16",
+   "title": "같이 애니보기",
+   "category": "small",
+   "createdAt": 1794699985000
+  },
+  {
+   "id": "inbox-20261115-17",
+   "title": "같이 크리스마스 트리 보기",
+   "category": "date",
+   "createdAt": 1794699984000
+  },
+  {
+   "id": "inbox-20261115-18",
+   "title": "같이 유기견 봉사 가기",
+   "category": "bucket",
+   "createdAt": 1794699983000
+  },
+  {
+   "id": "inbox-20261115-19",
+   "title": "애견 카페 가기",
+   "category": "date",
+   "createdAt": 1794699982000
+  },
+  {
+   "id": "inbox-20261115-20",
+   "title": "남산이랑 북악스카이웨이 가기",
+   "category": "date",
+   "createdAt": 1794699981000
+  },
+  {
+   "id": "inbox-20261115-21",
+   "title": "박물관 가기",
+   "category": "date",
+   "createdAt": 1794699980000
+  },
+  {
+   "id": "inbox-20261115-22",
+   "title": "클라이밍 하기",
+   "category": "date",
+   "createdAt": 1794699979000
+  },
+  {
+   "id": "inbox-20261115-23",
+   "title": "바다보러 가기",
+   "category": "trip",
+   "createdAt": 1794699978000
+  },
+  {
+   "id": "inbox-20261115-24",
+   "title": "근교 나가서 한식 한상차림 먹기",
+   "category": "food",
+   "createdAt": 1794699977000
+  },
+  {
+   "id": "inbox-20261115-25",
+   "title": "같이 첫 해외여행",
+   "category": "bucket",
+   "createdAt": 1794699976000
+  },
+  {
+   "id": "inbox-20261115-26",
+   "title": "LP카페 가기",
+   "category": "food",
+   "createdAt": 1794699975000
+  },
+  {
+   "id": "inbox-20261115-27",
+   "title": "워터밤 가기",
+   "category": "bucket",
+   "createdAt": 1794699974000
+  }
+ ]
+}
