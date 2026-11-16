@@ -2,7 +2,7 @@ import { db, uid } from './db.js';
 import { icon, heartFill } from './icons.js';
 import * as sync from './sync.js';
 
-export const APP_VERSION = '1.5.0';
+export const APP_VERSION = '1.6.0';
 
 /* ═════════════ 상수 ═════════════ */
 const CATS = [
