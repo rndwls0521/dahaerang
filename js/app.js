@@ -1,5 +1,8 @@
 import { db, uid } from './db.js';
 import { icon, heartFill } from './icons.js';
+import * as sync from './sync.js';
+
+export const APP_VERSION = '1.5.0';
 
 /* ═════════════ 상수 ═════════════ */
 const CATS = [
@@ -56,7 +59,7 @@ const haptic = (ms = 10) => { try { navigator.vibrate && navigator.vibrate(ms); 
 const live = (store) => S[store].filter((x) => !x.deleted);
 const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
-/* ═════════════ 저장소 (나중에 동기화 계층으로 교체될 부분) ═════════════ */
+/* ═════════════ 저장소 (로컬 저장 → 동기화 대기열) ═════════════ */
 async function saveRec(store, rec) {
   const now = Date.now();
   rec.updatedAt = now;
@@ -65,6 +68,7 @@ async function saveRec(store, rec) {
   const arr = S[store];
   const i = arr.findIndex((x) => x.id === rec.id);
   if (i >= 0) arr[i] = rec; else arr.push(rec);
+  sync.markDirty(store, rec.id);
   return rec;
 }
 async function removeRec(store, rec) {
@@ -76,6 +80,49 @@ async function removeRec(store, rec) {
 async function saveProfile() {
   S.profile.updatedAt = Date.now();
   await db.put('meta', S.profile);
+  sync.markDirty('meta', 'profile');
+}
+
+/* ═════════════ 상대 폰에서 온 변경 적용 ═════════════ */
+const STORE_OF = { memory: 'memories', wish: 'wishes' };
+async function applyRemote(rows, { forceProfile = false } = {}) {
+  let changed = false;
+  for (const row of rows) {
+    const data = row.data;
+    if (!data) continue;
+    const ts = Number(row.updated_at) || 0;
+    if (row.kind === 'profile') {
+      if (!forceProfile && ts <= (S.profile.updatedAt || 0)) continue;
+      const old = S.profile;
+      S.profile = { ...data, id: 'profile', lastBackup: old.lastBackup, updatedAt: ts };
+      for (const k of ['me', 'her']) if (old[k]?.photoId && old[k].photoId !== S.profile[k]?.photoId) await deletePhoto(old[k].photoId, false);
+      await db.put('meta', S.profile);
+      applyTheme();
+      changed = true;
+      continue;
+    }
+    const store = STORE_OF[row.kind];
+    if (!store) continue;
+    const cur = S[store].find((x) => x.id === row.id);
+    if (cur && ts <= (cur.updatedAt || 0)) continue;
+    const rec = { ...data, id: row.id, updatedAt: ts, deleted: !!row.deleted };
+    if (cur?.photoIds) for (const pid of cur.photoIds) if (!(rec.photoIds || []).includes(pid)) await deletePhoto(pid, false);
+    await db.put(store, rec);
+    if (cur) Object.assign(cur, rec); else S[store].push(rec);
+    changed = true;
+  }
+  if (changed) refreshSoon();
+  return changed;
+}
+let refreshTimer = null;
+function refreshSoon() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if (!S.profile.startDate) return;
+    // 입력 중일 때는 화면을 다시 그리지 않고, 창이 닫히면 반영
+    if (sheets.length || document.activeElement?.matches?.('input, textarea')) { S.pendingRender = true; return; }
+    rerender();
+  }, 250);
 }
 
 /* ═════════════ 사진 ═════════════ */
@@ -104,17 +151,25 @@ async function processPhoto(file) {
 async function photoURL(id, full = false) {
   const key = id + (full ? ':f' : ':t');
   if (S.photoURL.has(key)) return S.photoURL.get(key);
-  const rec = await db.get('photos', id);
-  if (!rec) return '';
+  let rec = await db.get('photos', id);
+  const has = full ? rec?.blob : rec?.thumb || rec?.blob;
+  if (!has) {
+    // 상대 폰에서 올린 사진은 처음 볼 때 서버에서 받아와 저장해요
+    const b = await sync.downloadPhoto(id, full);
+    if (!b) return '';
+    rec = { id, createdAt: Date.now(), ...(rec || {}), synced: true, [full ? 'blob' : 'thumb']: b };
+    await db.put('photos', rec);
+  }
   const url = URL.createObjectURL(full ? rec.blob : rec.thumb || rec.blob);
   S.photoURL.set(key, url);
   return url;
 }
-async function deletePhoto(id) {
+async function deletePhoto(id, remote = true) {
   for (const k of [id + ':t', id + ':f']) {
     if (S.photoURL.has(k)) { URL.revokeObjectURL(S.photoURL.get(k)); S.photoURL.delete(k); }
   }
   await db.del('photos', id);
+  if (remote) sync.deleteRemotePhoto(id);
 }
 function hydratePhotos(root = document) {
   $$('img[data-photo]', root).forEach(async (img) => {
@@ -253,6 +308,7 @@ function renderOnboarding() {
       <div class="field"><label>여자친구 이름</label><input class="input" name="her" value="다해" required maxlength="12"></div>
       <div class="field"><label>우리가 사귄 날 💘</label><input class="input" type="date" name="start" required max="${todayKey()}"></div>
       <button class="btn block" type="submit">${heartFill(18)} 시작하기</button>
+      ${sync.isConfigured() ? `<button type="button" class="btn ghost block" style="margin-top:10px" data-act="onboard-join">💞 연결 코드가 있어요</button>` : ''}
     </form>
   </div>`;
 }
@@ -652,6 +708,60 @@ function bdayForm(key) {
   });
 }
 
+/* ═════════════ 커플 연결 UI ═════════════ */
+const ago = (t) => { if (!t) return '아직'; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '방금' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
+const fmtCode = (c) => (c || '').replace(/(.{4})(?=.)/g, '$1-');
+const STATUS_TEXT = { idle: '✅ 동기화됨', syncing: '⏳ 동기화 중…', offline: '📴 오프라인 (연결되면 자동 전송)', error: '⚠️ 동기화 오류 (잠시 후 다시 시도)', lost: '🔑 다시 연결이 필요해요', off: '' };
+function syncRows() {
+  const i = sync.getInfo();
+  if (!i.configured) return `<div class="set-row"><div class="l">🛠️ 서버 준비 중</div><div class="r">곧 연결돼요</div></div>`;
+  if (!i.linked) return `
+    <button class="set-row" data-act="sync-create"><div class="l">🔗 연결 코드 만들기<small class="sub">내가 먼저 만들고 상대에게 알려주기</small></div><div class="r">${icon('right', 16)}</div></button>
+    <button class="set-row" data-act="sync-join"><div class="l">⌨️ 연결 코드 입력하기<small class="sub">상대가 만든 코드로 연결</small></div><div class="r">${icon('right', 16)}</div></button>`;
+  return `
+    <div class="set-row"><div class="l">${STATUS_TEXT[i.status] || '💞 연결됨'}</div><div class="r">${ago(i.lastSync)}</div></div>
+    <button class="set-row" data-act="sync-code"><div class="l">🔑 연결 코드</div><div class="r"><b class="code">${fmtCode(i.code)}</b> ${icon('right', 16)}</div></button>
+    <button class="set-row" data-act="sync-now"><div class="l">🔄 지금 동기화</div><div class="r">${icon('right', 16)}</div></button>
+    <button class="set-row" data-act="sync-unlink"><div class="l" style="color:#e2577a">연결 해제</div></button>`;
+}
+function codeSheet(code) {
+  openSheet('연결 코드 💞', `
+    <div class="code-box">${fmtCode(code)}</div>
+    <p class="hint" style="text-align:center;margin-bottom:16px">${esc(S.profile.her.name)} 폰의 다해랑 → 설정 → <b>연결 코드 입력하기</b>에<br>이 코드를 넣으면 두 폰이 연결돼요.</p>
+    <button class="btn block" data-copy>코드 보내기</button>`, (s) => {
+    $('[data-copy]', s.body).addEventListener('click', async () => {
+      const text = `💞 다해랑 연결 코드: ${fmtCode(code)}\n다해랑 → 설정 → 연결 코드 입력하기에 넣어줘!`;
+      if (navigator.share) { try { await navigator.share({ text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+      try { await navigator.clipboard.writeText(text); toast('코드를 복사했어요 📋'); } catch { toast(fmtCode(code)); }
+    });
+  });
+}
+function joinSheet({ fromOnboarding = false } = {}) {
+  openSheet('연결 코드 입력 ⌨️', `
+    <form>
+      <div class="field"><input class="input code-input" name="code" placeholder="XXXX-XXXX-XX" autocomplete="off" autocapitalize="characters" required></div>
+      <p class="hint">상대 폰의 설정 → 연결 코드에 있는 10자리예요.<br>연결하면 <b>이름·사귄 날·생일·기념일</b>은 상대 폰 정보로 맞춰지고, 추억과 위시는 두 폰 것이 합쳐져요.</p>
+      <button class="btn block" type="submit" style="margin-top:14px">연결하기 💞</button>
+    </form>`, (s) => {
+    const f = $('form', s.body);
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('[type=submit]', f); btn.disabled = true; btn.textContent = '연결 중…';
+      try {
+        await sync.joinCouple(f.code.value);
+        await s.close();
+        toast('연결됐어요! 이제 두 폰이 같이 움직여요 💞');
+        floatHearts(innerWidth / 2, innerHeight / 2);
+        if (fromOnboarding || !S.profile.startDate) location.hash = '#/home';
+        render();
+      } catch (err) {
+        btn.disabled = false; btn.textContent = '연결하기 💞';
+        toast(err.message === '코드가 맞지 않아요' ? '코드가 맞지 않아요 🥲' : '연결에 실패했어요. 인터넷을 확인해주세요');
+      }
+    });
+  });
+}
+
 function viewSettings() {
   const p = S.profile;
   const person = (key, who, label) => `
@@ -687,14 +797,17 @@ function viewSettings() {
   <div class="set-title">테마 색상</div>
   <div class="set-group"><div class="set-row"><div class="l">🎨 포인트 컬러</div><div class="theme-dots">${THEMES.map((t) => `<button style="background:${t.color}" class="${(p.theme || 'pink') === t.id ? 'on' : ''}" data-act="theme" data-theme="${t.id}" aria-label="${t.id}"></button>`).join('')}</div></div></div>
 
-  <div class="set-title">데이터 (지금은 이 폰에만 저장돼요)</div>
+  <div class="set-title">💞 커플 연결 (두 폰 동기화)</div>
+  <div class="set-group">${syncRows()}</div>
+
+  <div class="set-title">데이터</div>
   <div class="set-group">
     <button class="set-row" data-act="export"><div class="l">${icon('download', 18)} 백업 파일 만들기</div><div class="r">${p.lastBackup ? `마지막 ${fmtDot(p.lastBackup).slice(2)}` : '아직 안 했어요'} ${icon('right', 16)}</div></button>
     <label class="set-row" style="cursor:pointer"><div class="l">${icon('upload', 18)} 백업 불러오기</div><div class="r">${icon('right', 16)}</div><input type="file" accept="application/json,.json" hidden data-change="import"></label>
     <div class="set-row"><div class="l">💾 사용 중인 공간</div><div class="r" id="storage-usage">계산 중…</div></div>
   </div>
 
-  <div class="about"><img src="icons/icon-192.png" alt="">다해랑 v1.0<br>${esc(p.me.name)} ♥ ${esc(p.her.name)}의 기록장</div>`;
+  <div class="about"><img src="icons/icon-192.png" alt="">다해랑 v${APP_VERSION}<br>${esc(p.me.name)} ♥ ${esc(p.her.name)}의 기록장</div>`;
 }
 
 const afterRender = {
@@ -736,7 +849,12 @@ function closeLayer(s) {
     sheets.splice(i, 1);
     s._close();
     let done = false;
-    const fin = () => { if (!done) { done = true; res(); } };
+    const fin = () => {
+      if (done) return;
+      done = true;
+      if (S.pendingRender && !sheets.length) { S.pendingRender = false; setTimeout(rerender, 50); }
+      res();
+    };
     popWaiters.push(fin);
     history.back();
     setTimeout(() => { const j = popWaiters.indexOf(fin); if (j >= 0) popWaiters.splice(j, 1); fin(); }, 500);
@@ -1163,7 +1281,10 @@ async function exportData() {
   toast('백업 파일을 만드는 중… ⏳');
   const photos = await db.all('photos');
   const out = { app: 'dahaerang', version: 1, exportedAt: new Date().toISOString(), profile: S.profile, memories: S.memories, wishes: S.wishes, photos: [] };
-  for (const p of photos) out.photos.push({ id: p.id, createdAt: p.createdAt, blob: await blobToDataURL(p.blob), thumb: p.thumb ? await blobToDataURL(p.thumb) : null });
+  for (const p of photos) {
+    if (!p.blob && !p.thumb) continue;
+    out.photos.push({ id: p.id, createdAt: p.createdAt, blob: p.blob ? await blobToDataURL(p.blob) : null, thumb: p.thumb ? await blobToDataURL(p.thumb) : null });
+  }
   const name = `다해랑-백업-${todayKey()}.json`;
   const file = new File([JSON.stringify(out)], name, { type: 'application/json' });
   const markDone = async () => { S.profile.lastBackup = todayKey(); await db.put('meta', S.profile); if (parseRoute().name === 'settings') rerender(); };
@@ -1188,6 +1309,7 @@ async function importData(file) {
       if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) {
         await db.put(store, r);
         if (cur) Object.assign(cur, r); else S[store].push(r);
+        sync.markDirty(store, r.id);
       }
     }
   };
@@ -1195,9 +1317,9 @@ async function importData(file) {
   await merge('wishes', data.wishes);
   for (const p of data.photos || []) {
     if (await db.get('photos', p.id)) continue;
-    await db.put('photos', { id: p.id, createdAt: p.createdAt, blob: await dataURLToBlob(p.blob), thumb: p.thumb ? await dataURLToBlob(p.thumb) : null });
+    await db.put('photos', { id: p.id, createdAt: p.createdAt, blob: p.blob ? await dataURLToBlob(p.blob) : null, thumb: p.thumb ? await dataURLToBlob(p.thumb) : null });
   }
-  if (data.profile && (data.profile.updatedAt || 0) > (S.profile.updatedAt || 0)) { S.profile = { ...data.profile, id: 'profile' }; await db.put('meta', S.profile); applyTheme(); }
+  if (data.profile && (data.profile.updatedAt || 0) > (S.profile.updatedAt || 0)) { S.profile = { ...data.profile, id: 'profile' }; await db.put('meta', S.profile); sync.markDirty('meta', 'profile'); applyTheme(); }
   toast('불러오기 완료! 💗');
   rerender();
 }
@@ -1243,6 +1365,20 @@ const actions = {
   export: () => exportData(),
   'edit-bday': (el) => bdayForm(el.dataset.who),
   'edit-profile': (el) => profileSheet(el.dataset.who),
+  'sync-create': async (el) => {
+    if (!(await confirmDialog({ emoji: '💞', title: '연결 코드를 만들까요?', text: '지금 이 폰의 기록이 서버에 올라가고, 코드를 상대 폰에 넣으면 같이 쓸 수 있어요.', ok: '만들기' }))) return;
+    toast('연결 준비 중… 사진이 많으면 조금 걸려요 ⏳');
+    try { const code = await sync.createCouple(); rerender(); codeSheet(code); }
+    catch (e) { console.warn(e); toast('연결 코드를 만들지 못했어요. 인터넷을 확인해주세요'); }
+  },
+  'sync-join': () => joinSheet(),
+  'onboard-join': () => joinSheet({ fromOnboarding: true }),
+  'sync-code': () => codeSheet(sync.getInfo().code),
+  'sync-now': async () => { await sync.syncNow(); rerender(); toast(sync.getInfo().status === 'idle' ? '동기화 완료 ✅' : '동기화하지 못했어요'); },
+  'sync-unlink': async () => {
+    if (!(await confirmDialog({ title: '연결을 해제할까요?', text: '이 폰의 기록은 남지만 더 이상 상대 폰과 동기화되지 않아요. 같은 코드로 다시 연결할 수 있어요.', ok: '해제', danger: true }))) return;
+    await sync.unlink(); rerender(); toast('연결을 해제했어요');
+  },
   'share-app': async () => {
     const url = 'https://rndwls0521.github.io/dahaerang/';
     const text = `💕 우리 커플앱 [다해랑] 설치해줘!\n아이폰: Safari로 열고 공유 버튼 → '홈 화면에 추가'\n안드로이드: Chrome으로 열고 메뉴 → '앱 설치'`;
@@ -1306,6 +1442,7 @@ async function checkInbox() {
       const rec = { done: false, targetDate: '', note: '', category: 'date', ...w, updatedAt: w.createdAt || Date.now() };
       await db.put('wishes', rec);
       S.wishes.push(rec);
+      sync.markDirty('wishes', rec.id);
       added++;
     }
     if (added) {
@@ -1325,6 +1462,13 @@ async function init() {
   render();
   try { navigator.storage?.persist?.(); } catch {}
   checkInbox();
+  sync.init({
+    applyRemote,
+    onStatus: (st) => {
+      if (parseRoute().name === 'settings' && !sheets.length && !document.activeElement?.matches?.('input')) rerender();
+      if (st === 'lost') toast('동기화 연결이 끊겼어요. 설정에서 연결 코드를 다시 입력해주세요 🔑');
+    },
+  });
   // 날짜가 바뀌었을 때만 D-day 갱신 (입력 중인 내용이 날아가지 않게)
   let day = todayKey();
   document.addEventListener('visibilitychange', () => {
@@ -1336,6 +1480,19 @@ async function init() {
   document.addEventListener('touchstart', () => {}, { passive: true });
 }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // 새 버전이 올라오면 앱을 다시 열 때 바로 받아오도록, 열 때마다 업데이트 확인
+  window.addEventListener('load', async () => {
+    try {
+      const hadController = !!navigator.serviceWorker.controller;
+      const reg = await navigator.serviceWorker.register('sw.js');
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloaded || sheets.length) return;
+        reloaded = true;
+        location.reload();
+      });
+    } catch {}
+  });
 }
 init();
